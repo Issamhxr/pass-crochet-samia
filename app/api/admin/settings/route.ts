@@ -1,20 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readFile, writeFile, mkdir } from 'fs/promises'
-import path from 'path'
-
-const SETTINGS_PATH = path.join(process.cwd(), 'data', 'settings.json')
+import { createClient } from '@supabase/supabase-js'
 
 function isAuthorized(request: NextRequest) {
   const session = request.cookies.get('admin_session')
   return session && session.value === process.env.ADMIN_SESSION_TOKEN
 }
 
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+  )
+}
+
+const DEFAULT_SETTINGS = { paypal: { clientId: '', clientSecret: '', mode: 'sandbox' } }
+
 async function readSettings() {
   try {
-    const content = await readFile(SETTINGS_PATH, 'utf-8')
-    return JSON.parse(content)
+    const { data } = await getSupabase()
+      .from('settings')
+      .select('value')
+      .eq('key', 'main')
+      .single()
+    return data?.value || DEFAULT_SETTINGS
   } catch {
-    return { paypal: { clientId: '', clientSecret: '', mode: 'sandbox' } }
+    return DEFAULT_SETTINGS
   }
 }
 
@@ -23,12 +33,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
   }
   const settings = await readSettings()
-  // Mask the secret for the response
-  if (settings.paypal?.clientSecret) {
-    settings.paypal.clientSecretMasked = '••••••••' + settings.paypal.clientSecret.slice(-4)
-    delete settings.paypal.clientSecret
+  const response = JSON.parse(JSON.stringify(settings))
+  if (response.paypal?.clientSecret) {
+    response.paypal.clientSecretMasked = '••••••••' + response.paypal.clientSecret.slice(-4)
+    delete response.paypal.clientSecret
   }
-  return NextResponse.json(settings)
+  return NextResponse.json(response)
 }
 
 export async function PUT(request: NextRequest) {
@@ -41,13 +51,14 @@ export async function PUT(request: NextRequest) {
     const current = await readSettings()
     const updated = { ...current, ...body }
 
-    // Don't overwrite secret if it comes back masked
     if (body.paypal?.clientSecret?.startsWith('••')) {
       updated.paypal.clientSecret = current.paypal?.clientSecret || ''
     }
 
-    await mkdir(path.join(process.cwd(), 'data'), { recursive: true })
-    await writeFile(SETTINGS_PATH, JSON.stringify(updated, null, 2))
+    await getSupabase()
+      .from('settings')
+      .upsert({ key: 'main', value: updated, updated_at: new Date().toISOString() })
+
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Settings save error:', error)
