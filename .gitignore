@@ -16,3 +16,4 @@ node_modules
 
 # Sensitive server-side settings (contains PayPal credentials after setup)
 data/settings.json
+.vercel
