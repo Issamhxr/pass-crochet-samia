@@ -1,14 +1,13 @@
 'use client'
 
 import { useState, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Lock, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 function LoginForm() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const from = searchParams.get('from') || '/admin'
 
@@ -23,7 +22,7 @@ function LoginForm() {
     setLoading(true)
     setError('')
 
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
 
     if (authError) {
       setError('Email ou mot de passe incorrect')
@@ -31,8 +30,22 @@ function LoginForm() {
       return
     }
 
-    router.push(from)
-    router.refresh()
+    // Verify the user actually has admin role in profiles table
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', data.user.id)
+      .single()
+
+    if (!profile || profile.role !== 'admin') {
+      await supabase.auth.signOut()
+      setError('Accès refusé. Ce compte n\'a pas les droits d\'administration.')
+      setLoading(false)
+      return
+    }
+
+    // Hard redirect so middleware sees fresh cookies
+    window.location.href = from
   }
 
   return (
