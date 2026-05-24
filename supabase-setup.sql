@@ -3,6 +3,46 @@
 -- Run this once in: Supabase > SQL Editor
 -- ============================================
 
+-- ---- User profiles (extends Supabase Auth) ----
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email TEXT,
+  full_name TEXT,
+  role TEXT NOT NULL DEFAULT 'client' CHECK (role IN ('admin', 'client', 'vendeur')),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
+
+-- Auto-create profile on signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name, role)
+  VALUES (
+    new.id,
+    new.email,
+    COALESCE(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
+    COALESCE(new.raw_user_meta_data->>'role', 'client')
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- ==============================================
+-- HOW TO CREATE YOUR ADMIN ACCOUNT:
+-- 1. Go to Supabase Dashboard → Authentication → Users → "Add user"
+-- 2. Enter your email + password (check "Auto Confirm User")
+-- 3. Run this SQL (replace with your actual email):
+--    UPDATE profiles SET role = 'admin' WHERE email = 'YOUR_EMAIL@example.com';
+-- ==============================================
+
 -- Products table
 CREATE TABLE IF NOT EXISTS products (
   id TEXT PRIMARY KEY,

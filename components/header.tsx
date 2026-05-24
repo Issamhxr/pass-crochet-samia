@@ -1,13 +1,21 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Menu, X, ShoppingCart, Settings } from 'lucide-react'
+import { Menu, X, ShoppingCart, Settings, UserCircle2 } from 'lucide-react'
 import { useCart } from '@/lib/cart-context'
+import { supabase } from '@/lib/supabase'
 
 export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
   const { totalItems } = useCart()
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setIsLoggedIn(!!session))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => setIsLoggedIn(!!session))
+    return () => subscription.unsubscribe()
+  }, [])
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background">
@@ -59,6 +67,9 @@ export function Header() {
 
           {/* Right Icons */}
           <div className="flex items-center gap-4">
+            <Link href="/compte" className="hidden md:flex items-center justify-center p-2 text-foreground hover:text-primary transition-colors" title={isLoggedIn ? 'Mon compte' : 'Connexion'}>
+              <UserCircle2 size={20} className={isLoggedIn ? 'text-primary' : ''} />
+            </Link>
             <Link href="/admin" className="hidden md:flex items-center justify-center p-2 text-foreground hover:text-primary transition-colors" title="Admin">
               <Settings size={20} />
             </Link>
@@ -114,6 +125,12 @@ export function Header() {
                 className="block text-sm font-medium text-foreground hover:text-primary transition-colors"
               >
                 Contact
+              </Link>
+              <Link
+                href="/compte"
+                className="block text-sm font-medium text-foreground hover:text-primary transition-colors"
+              >
+                {isLoggedIn ? 'Mon compte' : 'Connexion / Inscription'}
               </Link>
             </nav>
           </div>
