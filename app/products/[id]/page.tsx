@@ -10,15 +10,14 @@ import { Footer } from '@/components/footer'
 import { ShoppingCart, ArrowLeft, Star, Heart, Check, Loader2 } from 'lucide-react'
 import { useCart } from '@/lib/cart-context'
 import { supabase, dbToProduct } from '@/lib/supabase'
-import { products as staticProducts } from '@/lib/products-data'
 
 type Product = ReturnType<typeof dbToProduct>
 
 export default function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const [product, setProduct] = useState<Product | null>(staticProducts[id] ? dbToProduct({ ...staticProducts[id], in_stock: staticProducts[id].inStock, care_instructions: staticProducts[id].careInstructions, related_products: staticProducts[id].relatedProducts } as any) : null)
+  const [product, setProduct] = useState<Product | null>(null)
   const [related, setRelated] = useState<Product[]>([])
-  const [loading, setLoading] = useState(!staticProducts[id])
+  const [loading, setLoading] = useState(true)
   const [quantity, setQuantity] = useState(1)
   const [isWishlisted, setIsWishlisted] = useState(false)
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({})
