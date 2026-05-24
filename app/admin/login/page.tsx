@@ -31,15 +31,33 @@ function LoginForm() {
     }
 
     // Verify the user actually has admin role in profiles table
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('role')
+      .select('role, email')
       .eq('id', data.user.id)
-      .single()
+      .maybeSingle()
 
-    if (!profile || profile.role !== 'admin') {
+    console.log('Auth user:', data.user)
+    console.log('Profile:', profile)
+    console.log('Profile error:', profileError)
+
+    if (profileError) {
       await supabase.auth.signOut()
-      setError('Accès refusé. Ce compte n\'a pas les droits d\'administration.')
+      setError(`Erreur DB: ${profileError.message} (code ${profileError.code}). Avez-vous exécuté le SQL de création de profiles ?`)
+      setLoading(false)
+      return
+    }
+
+    if (!profile) {
+      await supabase.auth.signOut()
+      setError(`Aucun profil trouvé. ID utilisateur: ${data.user.id}. Exécutez le SQL d'insertion du profil admin.`)
+      setLoading(false)
+      return
+    }
+
+    if (profile.role !== 'admin') {
+      await supabase.auth.signOut()
+      setError(`Profil trouvé (${profile.email}) mais rôle "${profile.role}" — rôle "admin" requis.`)
       setLoading(false)
       return
     }
