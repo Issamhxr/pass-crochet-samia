@@ -21,6 +21,7 @@ export interface DbProduct {
   variants: any[]
   rating: number
   reviews: number
+  featured: boolean
   created_at?: string
 }
 
@@ -41,6 +42,7 @@ export function dbToProduct(row: DbProduct) {
     variants: row.variants || [],
     rating: Number(row.rating) || 5.0,
     reviews: row.reviews || 0,
+    featured: row.featured ?? false,
   }
 }
 
@@ -61,5 +63,6 @@ export function productToDb(p: ReturnType<typeof dbToProduct> & { id?: string })
     variants: p.variants || [],
     rating: p.rating || 5.0,
     reviews: p.reviews || 0,
+    featured: (p as any).featured ?? false,
   }
 }

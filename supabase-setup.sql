@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 );
 
 ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
+GRANT ALL ON public.profiles TO anon, authenticated, service_role;
 
 -- Auto-create profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -60,8 +61,12 @@ CREATE TABLE IF NOT EXISTS products (
   variants JSONB DEFAULT '[]',
   rating DECIMAL(3,1) DEFAULT 5.0,
   reviews INTEGER DEFAULT 0,
+  featured BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- If products already exists, add the column
+ALTER TABLE products ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT false;
 
 -- Categories table
 CREATE TABLE IF NOT EXISTS categories (

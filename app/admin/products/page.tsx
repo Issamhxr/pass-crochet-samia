@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { supabase, dbToProduct, productToDb } from '@/lib/supabase'
 import { CATEGORIES } from '@/lib/products-data'
-import { Plus, Edit, Trash2, Search, X, Check, Package, Loader2 } from 'lucide-react'
+import { Plus, Edit, Trash2, Search, X, Check, Package, Loader2, Star } from 'lucide-react'
 
 interface Product {
   id: string
@@ -24,6 +24,7 @@ interface Product {
   variants: any[]
   rating: number
   reviews: number
+  featured: boolean
 }
 
 const blank: Omit<Product, 'id'> = {
@@ -32,6 +33,7 @@ const blank: Omit<Product, 'id'> = {
   inStock: true, description: '',
   materials: '', dimensions: '', careInstructions: '',
   relatedProducts: [], variants: [], rating: 5.0, reviews: 0,
+  featured: false,
 }
 
 export default function ProductsAdmin() {
@@ -76,7 +78,7 @@ export default function ProductsAdmin() {
       description: p.description, materials: p.materials,
       dimensions: p.dimensions, careInstructions: p.careInstructions,
       relatedProducts: p.relatedProducts, variants: p.variants,
-      rating: p.rating, reviews: p.reviews,
+      rating: p.rating, reviews: p.reviews, featured: p.featured,
     })
     setEditingId(p.id)
     setModalOpen(true)
@@ -136,7 +138,7 @@ export default function ProductsAdmin() {
         {search && <button onClick={() => setSearch('')}><X size={14} className="text-muted-foreground" /></button>}
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="p-4 text-center">
           <p className="text-2xl font-bold text-foreground">{products.length}</p>
           <p className="text-xs text-muted-foreground">Total produits</p>
@@ -144,6 +146,10 @@ export default function ProductsAdmin() {
         <Card className="p-4 text-center">
           <p className="text-2xl font-bold text-green-600">{products.filter(p => p.inStock).length}</p>
           <p className="text-xs text-muted-foreground">En stock</p>
+        </Card>
+        <Card className="p-4 text-center">
+          <p className="text-2xl font-bold text-amber-500">{products.filter(p => p.featured).length}/6</p>
+          <p className="text-xs text-muted-foreground">En vedette</p>
         </Card>
         <Card className="p-4 text-center">
           <p className="text-2xl font-bold text-foreground">{products.reduce((s, p) => s + p.stock, 0)}</p>
@@ -174,10 +180,15 @@ export default function ProductsAdmin() {
                   <tr key={product.id} className="hover:bg-secondary/30 transition-colors">
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-muted/30 flex-shrink-0">
+                        <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-muted/30 shrink-0">
                           <Image src={product.image} alt={product.name} fill className="object-cover" unoptimized />
                         </div>
                         <span className="font-medium text-foreground">{product.name}</span>
+                        {product.featured && (
+                          <span title="Affiché sur la page d'accueil">
+                            <Star size={14} className="fill-amber-400 text-amber-400 shrink-0" />
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-5 py-3 text-muted-foreground hidden sm:table-cell">{product.category}</td>
@@ -263,6 +274,13 @@ export default function ProductsAdmin() {
               <div className="flex items-center gap-2">
                 <input type="checkbox" id="inStock" checked={form.inStock} onChange={e => setForm(p => ({ ...p, inStock: e.target.checked }))} className="w-4 h-4 accent-primary" />
                 <label htmlFor="inStock" className="text-sm text-foreground">En vente (visible en boutique)</label>
+              </div>
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                <input type="checkbox" id="featured" checked={form.featured} onChange={e => setForm(p => ({ ...p, featured: e.target.checked }))} className="w-4 h-4 accent-amber-500" />
+                <label htmlFor="featured" className="text-sm text-foreground flex items-center gap-1.5">
+                  <Star size={14} className="fill-amber-400 text-amber-400" />
+                  Afficher sur la page d'accueil (max 6 produits)
+                </label>
               </div>
             </div>
 
