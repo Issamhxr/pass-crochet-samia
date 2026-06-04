@@ -36,7 +36,7 @@ export default function Shop() {
           .select('id,name,category,price,image,description,in_stock')
           .eq('in_stock', true)
           .order('name'),
-        supabase.from('categories').select('name').order('position').order('id'),
+        supabase.from('categories').select('name, parent_id, position').order('position').order('id'),
       ])
       if (prods) {
         setProducts(
@@ -51,14 +51,22 @@ export default function Shop() {
           })),
         )
       }
-      if (cats) setCategories(['Tous', ...cats.map((c: any) => c.name)])
+      if (cats) {
+        // Top-level categories only as filter chips
+        const parents = cats.filter((c: any) => c.parent_id === null).map((c: any) => c.name)
+        setCategories(['Tous', ...parents])
+      }
       setLoading(false)
     }
     load()
   }, [])
 
   const filteredProducts =
-    selectedCategory === 'Tous' ? products : products.filter(p => p.category === selectedCategory)
+    selectedCategory === 'Tous'
+      ? products
+      : products.filter(p =>
+          p.category === selectedCategory || p.category.startsWith(`${selectedCategory} › `),
+        )
 
   return (
     <main className="flex flex-col min-h-screen">

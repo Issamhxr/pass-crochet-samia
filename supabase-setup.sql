@@ -90,13 +90,21 @@ CREATE TABLE IF NOT EXISTS orders (
 ALTER TABLE orders DISABLE ROW LEVEL SECURITY;
 GRANT ALL ON public.orders TO anon, authenticated, service_role;
 
--- Categories table
+-- Categories table (supports sub-categories via parent_id)
 CREATE TABLE IF NOT EXISTS categories (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
+  parent_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
   position INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- If categories already exists, add the parent_id column for sub-categories
+ALTER TABLE categories ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES categories(id) ON DELETE CASCADE;
+
+-- Grant access to API roles incl. the SERIAL id sequence (needed to INSERT categories)
+GRANT ALL ON public.categories TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 
 -- Settings table (key-value store)
 CREATE TABLE IF NOT EXISTS settings (

@@ -70,10 +70,19 @@ export default function ProductsAdmin() {
     setLoading(true)
     const [{ data: prods }, { data: cats }] = await Promise.all([
       supabase.from('products').select('*').order('name'),
-      supabase.from('categories').select('name').order('position').order('id'),
+      supabase.from('categories').select('id, name, parent_id, position').order('position').order('id'),
     ])
     if (prods) setProducts(prods.map(dbToProduct) as Product[])
-    if (cats && cats.length > 0) setCategories(cats.map(c => c.name))
+    if (cats && cats.length > 0) {
+      // Build a hierarchical, ordered list of category names (sub-categories indented)
+      const parents = cats.filter((c: any) => c.parent_id === null)
+      const ordered: string[] = []
+      parents.forEach((p: any) => {
+        ordered.push(p.name)
+        cats.filter((c: any) => c.parent_id === p.id).forEach((s: any) => ordered.push(`${p.name} › ${s.name}`))
+      })
+      setCategories(ordered.length > 0 ? ordered : cats.map((c: any) => c.name))
+    }
     setLoading(false)
   }
 
@@ -397,6 +406,10 @@ export default function ProductsAdmin() {
                     <div>
                       <label className="block text-xs font-medium text-foreground mb-1">Catégorie</label>
                       <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))} className={inputClass}>
+                        {categories.length === 0 && <option value="">(Créez des catégories d'abord)</option>}
+                        {form.category && !categories.includes(form.category) && (
+                          <option value={form.category}>{form.category}</option>
+                        )}
                         {categories.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                     </div>
