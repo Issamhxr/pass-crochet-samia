@@ -1,15 +1,32 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
+import { NextRequest, NextResponse } from 'next/server'
 
-function isAuthorized(request: NextRequest) {
-  const session = request.cookies.get('admin_session')
-  return session && session.value === process.env.ADMIN_SESSION_TOKEN
+async function isAdmin(request: NextRequest) {
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      cookies: {
+        getAll() { return request.cookies.getAll() },
+        setAll() {},
+      },
+    },
+  )
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle()
+  return profile?.role === 'admin'
 }
 
 function getSupabase() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
   )
 }
 
@@ -29,7 +46,7 @@ async function readSettings() {
 }
 
 export async function GET(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!(await isAdmin(request))) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
   }
   const settings = await readSettings()
@@ -42,7 +59,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!(await isAdmin(request))) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
   }
 

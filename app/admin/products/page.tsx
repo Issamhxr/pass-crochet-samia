@@ -1,12 +1,27 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { supabase, dbToProduct, productToDb } from '@/lib/supabase'
 import { CATEGORIES } from '@/lib/products-data'
-import { Plus, Edit, Trash2, Search, X, Check, Package, Loader2, Star } from 'lucide-react'
+import {
+  Plus, Edit, Trash2, Search, X, Check, Package, Loader2, Star,
+  Upload, ImageIcon, Palette,
+} from 'lucide-react'
+
+interface VariantOption {
+  name: string
+  value: string
+  priceModifier?: number
+}
+
+interface Variant {
+  type: 'color' | 'size' | 'material' | 'style' | 'custom'
+  label: string
+  options: VariantOption[]
+}
 
 interface Product {
   id: string
@@ -21,7 +36,7 @@ interface Product {
   dimensions: string
   careInstructions: string
   relatedProducts: string[]
-  variants: any[]
+  variants: Variant[]
   rating: number
   reviews: number
   featured: boolean
@@ -36,8 +51,17 @@ const blank: Omit<Product, 'id'> = {
   featured: false,
 }
 
+const VARIANT_TYPES = [
+  { value: 'color', label: 'Couleur' },
+  { value: 'size', label: 'Taille' },
+  { value: 'material', label: 'Matériau' },
+  { value: 'style', label: 'Style' },
+  { value: 'custom', label: 'Personnalisé' },
+] as const
+
 export default function ProductsAdmin() {
   const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<string[]>(CATEGORIES)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
@@ -45,29 +69,34 @@ export default function ProductsAdmin() {
   const [form, setForm] = useState<Omit<Product, 'id'>>(blank)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 2000) }
 
-  useEffect(() => {
-    loadProducts()
-  }, [])
+  useEffect(() => { loadAll() }, [])
 
-  async function loadProducts() {
+  async function loadAll() {
     setLoading(true)
-    const { data, error } = await supabase.from('products').select('*').order('name')
-    if (data) setProducts(data.map(dbToProduct) as Product[])
-    if (error) console.error('Load products error:', error)
+    const [{ data: prods }, { data: cats }] = await Promise.all([
+      supabase.from('products').select('*').order('name'),
+      supabase.from('categories').select('name').order('position').order('id'),
+    ])
+    if (prods) setProducts(prods.map(dbToProduct) as Product[])
+    if (cats && cats.length > 0) setCategories(cats.map(c => c.name))
     setLoading(false)
   }
 
   const filtered = products.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.category.toLowerCase().includes(search.toLowerCase())
+    p.category.toLowerCase().includes(search.toLowerCase()),
   )
 
   const openAdd = () => {
-    setForm({ ...blank })
+    setForm({ ...blank, category: categories[0] || CATEGORIES[0] })
     setEditingId(null)
+    setUploadError('')
     setModalOpen(true)
   }
 
@@ -77,10 +106,11 @@ export default function ProductsAdmin() {
       image: p.image, stock: p.stock, inStock: p.inStock,
       description: p.description, materials: p.materials,
       dimensions: p.dimensions, careInstructions: p.careInstructions,
-      relatedProducts: p.relatedProducts, variants: p.variants,
+      relatedProducts: p.relatedProducts, variants: p.variants || [],
       rating: p.rating, reviews: p.reviews, featured: p.featured,
     })
     setEditingId(p.id)
+    setUploadError('')
     setModalOpen(true)
   }
 
@@ -100,16 +130,83 @@ export default function ProductsAdmin() {
     const row = productToDb({ ...form, id } as any)
     const { error } = await supabase.from('products').upsert(row)
     if (!error) {
-      await loadProducts()
+      await loadAll()
       setModalOpen(false)
       flash()
     } else {
       console.error('Save error:', error)
+      alert('Erreur de sauvegarde: ' + error.message)
     }
     setSaving(false)
   }
 
+  const handleFileUpload = async (file: File) => {
+    setUploading(true)
+    setUploadError('')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/upload-image', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (res.ok && data.path) {
+        setForm(p => ({ ...p, image: data.path }))
+      } else {
+        setUploadError(data.error || 'Erreur de téléchargement')
+      }
+    } catch (err: any) {
+      setUploadError(err?.message || 'Erreur réseau')
+    }
+    setUploading(false)
+  }
+
+  // ---- Variants editor helpers ----
+  const addVariant = () => {
+    setForm(p => ({
+      ...p,
+      variants: [...p.variants, { type: 'color', label: 'Couleur', options: [] }],
+    }))
+  }
+  const updateVariant = (idx: number, patch: Partial<Variant>) => {
+    setForm(p => ({
+      ...p,
+      variants: p.variants.map((v, i) => i === idx ? { ...v, ...patch } : v),
+    }))
+  }
+  const removeVariant = (idx: number) => {
+    setForm(p => ({ ...p, variants: p.variants.filter((_, i) => i !== idx) }))
+  }
+  const addOption = (variantIdx: number) => {
+    setForm(p => ({
+      ...p,
+      variants: p.variants.map((v, i) =>
+        i === variantIdx ? { ...v, options: [...v.options, { name: '', value: '' }] } : v,
+      ),
+    }))
+  }
+  const updateOption = (variantIdx: number, optIdx: number, patch: Partial<VariantOption>) => {
+    setForm(p => ({
+      ...p,
+      variants: p.variants.map((v, i) => {
+        if (i !== variantIdx) return v
+        return {
+          ...v,
+          options: v.options.map((o, j) => j === optIdx ? { ...o, ...patch } : o),
+        }
+      }),
+    }))
+  }
+  const removeOption = (variantIdx: number, optIdx: number) => {
+    setForm(p => ({
+      ...p,
+      variants: p.variants.map((v, i) => {
+        if (i !== variantIdx) return v
+        return { ...v, options: v.options.filter((_, j) => j !== optIdx) }
+      }),
+    }))
+  }
+
   const inputClass = 'w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary'
+  const smallInputClass = 'px-2 py-1.5 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary'
 
   return (
     <div className="space-y-6">
@@ -189,6 +286,12 @@ export default function ProductsAdmin() {
                             <Star size={14} className="fill-amber-400 text-amber-400 shrink-0" />
                           </span>
                         )}
+                        {product.variants?.length > 0 && (
+                          <span title={`${product.variants.length} variante(s)`} className="inline-flex items-center gap-1 text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                            <Palette size={11} />
+                            {product.variants.length}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-5 py-3 text-muted-foreground hidden sm:table-cell">{product.category}</td>
@@ -226,14 +329,15 @@ export default function ProductsAdmin() {
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <Card className="w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
+          <Card className="w-full max-w-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between sticky top-0 bg-card -mx-6 px-6 -mt-6 pt-6 pb-3 border-b border-border z-10">
               <h2 className="text-lg font-semibold text-foreground">
                 {editingId ? 'Modifier le produit' : 'Nouveau produit'}
               </h2>
               <button onClick={() => setModalOpen(false)} className="p-1 rounded hover:bg-secondary"><X size={18} /></button>
             </div>
 
+            {/* Basic fields */}
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-foreground mb-1">Nom *</label>
@@ -252,25 +356,175 @@ export default function ProductsAdmin() {
               <div>
                 <label className="block text-xs font-medium text-foreground mb-1">Catégorie</label>
                 <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))} className={inputClass}>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-foreground mb-1">Description</label>
-                <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={3} className={inputClass} placeholder="Description du produit..." />
+                <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={4} className={inputClass} placeholder="Description du produit..." />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">Matériaux</label>
+                  <input value={form.materials} onChange={e => setForm(p => ({ ...p, materials: e.target.value }))} className={inputClass} placeholder="Fil acrylique 100%" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">Dimensions</label>
+                  <input value={form.dimensions} onChange={e => setForm(p => ({ ...p, dimensions: e.target.value }))} className={inputClass} placeholder="Hauteur: 15cm" />
+                </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-foreground mb-1">Matériaux</label>
-                <input value={form.materials} onChange={e => setForm(p => ({ ...p, materials: e.target.value }))} className={inputClass} placeholder="Ex: Fil acrylique 100%" />
+                <label className="block text-xs font-medium text-foreground mb-1">Entretien</label>
+                <input value={form.careInstructions} onChange={e => setForm(p => ({ ...p, careInstructions: e.target.value }))} className={inputClass} placeholder="Lavage à la main" />
               </div>
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">Dimensions</label>
-                <input value={form.dimensions} onChange={e => setForm(p => ({ ...p, dimensions: e.target.value }))} className={inputClass} placeholder="Ex: Hauteur: 15cm" />
+            </div>
+
+            {/* Image */}
+            <div className="space-y-2 pt-3 border-t border-border">
+              <label className="block text-sm font-semibold text-foreground flex items-center gap-2">
+                <ImageIcon size={16} className="text-primary" />
+                Image du produit
+              </label>
+              <div className="flex gap-3 items-start">
+                <div className="relative w-24 h-24 rounded-lg overflow-hidden bg-muted/30 border border-border shrink-0">
+                  {form.image ? (
+                    <Image src={form.image} alt="" fill className="object-cover" unoptimized />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+                      <ImageIcon size={24} />
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 space-y-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    className="hidden"
+                    onChange={e => {
+                      const f = e.target.files?.[0]
+                      if (f) handleFileUpload(f)
+                      if (fileInputRef.current) fileInputRef.current.value = ''
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    variant="outline"
+                    size="sm"
+                    className="w-full gap-2"
+                  >
+                    {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    {uploading ? 'Téléchargement...' : 'Téléverser une image'}
+                  </Button>
+                  <input
+                    value={form.image}
+                    onChange={e => setForm(p => ({ ...p, image: e.target.value }))}
+                    className={`${inputClass} text-xs`}
+                    placeholder="ou URL de l'image"
+                  />
+                  {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
+                  <p className="text-xs text-muted-foreground">JPG, PNG, WebP — max 5MB</p>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">Image (URL ou chemin)</label>
-                <input value={form.image} onChange={e => setForm(p => ({ ...p, image: e.target.value }))} className={inputClass} placeholder="/images/product-1.jpg" />
+            </div>
+
+            {/* Variants */}
+            <div className="space-y-3 pt-3 border-t border-border">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Palette size={16} className="text-primary" />
+                  Variantes ({form.variants.length})
+                </label>
+                <Button type="button" onClick={addVariant} variant="outline" size="sm" className="gap-1.5 h-8">
+                  <Plus size={13} /> Ajouter
+                </Button>
               </div>
+
+              {form.variants.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-3 bg-secondary/30 rounded-lg">
+                  Aucune variante. Ajoutez des couleurs, tailles, etc.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {form.variants.map((variant, vIdx) => (
+                    <div key={vIdx} className="border border-border rounded-lg p-3 space-y-3 bg-secondary/10">
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={variant.type}
+                          onChange={e => updateVariant(vIdx, { type: e.target.value as Variant['type'] })}
+                          className={smallInputClass}
+                        >
+                          {VARIANT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                        </select>
+                        <input
+                          value={variant.label}
+                          onChange={e => updateVariant(vIdx, { label: e.target.value })}
+                          className={`flex-1 ${smallInputClass}`}
+                          placeholder="Étiquette (ex: Couleur)"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeVariant(vIdx)}
+                          className="p-1.5 rounded text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors shrink-0"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {variant.options.map((opt, oIdx) => (
+                          <div key={oIdx} className="flex items-center gap-1.5">
+                            <input
+                              value={opt.name}
+                              onChange={e => updateOption(vIdx, oIdx, { name: e.target.value })}
+                              className={`flex-1 ${smallInputClass}`}
+                              placeholder="Nom (Rouge)"
+                            />
+                            <input
+                              value={opt.value}
+                              onChange={e => updateOption(vIdx, oIdx, { value: e.target.value })}
+                              className={`w-24 ${smallInputClass}`}
+                              placeholder="Valeur"
+                            />
+                            <input
+                              type="number"
+                              step="0.5"
+                              value={opt.priceModifier ?? ''}
+                              onChange={e => updateOption(vIdx, oIdx, {
+                                priceModifier: e.target.value ? parseFloat(e.target.value) : undefined,
+                              })}
+                              className={`w-20 ${smallInputClass}`}
+                              placeholder="+€"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeOption(vIdx, oIdx)}
+                              className="p-1.5 rounded text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors shrink-0"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                        <Button
+                          type="button"
+                          onClick={() => addOption(vIdx)}
+                          variant="outline"
+                          size="sm"
+                          className="w-full gap-1.5 h-7 text-xs border-dashed"
+                        >
+                          <Plus size={12} /> Ajouter une option
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Flags */}
+            <div className="space-y-3 pt-3 border-t border-border">
               <div className="flex items-center gap-2">
                 <input type="checkbox" id="inStock" checked={form.inStock} onChange={e => setForm(p => ({ ...p, inStock: e.target.checked }))} className="w-4 h-4 accent-primary" />
                 <label htmlFor="inStock" className="text-sm text-foreground">En vente (visible en boutique)</label>
@@ -284,7 +538,8 @@ export default function ProductsAdmin() {
               </div>
             </div>
 
-            <div className="flex gap-3 pt-2">
+            {/* Actions */}
+            <div className="flex gap-3 pt-3 border-t border-border sticky bottom-0 bg-card -mx-6 px-6 -mb-6 pb-6">
               <Button onClick={handleSave} disabled={!form.name.trim() || form.price <= 0 || saving} className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 gap-2">
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                 {editingId ? 'Mettre à jour' : 'Créer le produit'}
