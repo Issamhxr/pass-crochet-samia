@@ -8,13 +8,14 @@ import { supabase, dbToProduct, productToDb } from '@/lib/supabase'
 import { CATEGORIES } from '@/lib/products-data'
 import {
   Plus, Edit, Trash2, Search, X, Check, Package, Loader2, Star,
-  Upload, ImageIcon, Palette,
+  Upload, ImageIcon, Palette, Settings2, FileText,
 } from 'lucide-react'
 
 interface VariantOption {
   name: string
   value: string
   priceModifier?: number
+  stock?: number
 }
 
 interface Variant {
@@ -44,7 +45,7 @@ interface Product {
 
 const blank: Omit<Product, 'id'> = {
   name: '', category: CATEGORIES[0], price: 0,
-  image: '/images/product-1.jpg', stock: 0,
+  image: '', stock: 0,
   inStock: true, description: '',
   materials: '', dimensions: '', careInstructions: '',
   relatedProducts: [], variants: [], rating: 5.0, reviews: 0,
@@ -59,6 +60,8 @@ const VARIANT_TYPES = [
   { value: 'custom', label: 'Personnalisé' },
 ] as const
 
+type Tab = 'general' | 'variants' | 'advanced'
+
 export default function ProductsAdmin() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<string[]>(CATEGORIES)
@@ -67,6 +70,7 @@ export default function ProductsAdmin() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<Omit<Product, 'id'>>(blank)
+  const [tab, setTab] = useState<Tab>('general')
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -97,6 +101,7 @@ export default function ProductsAdmin() {
     setForm({ ...blank, category: categories[0] || CATEGORIES[0] })
     setEditingId(null)
     setUploadError('')
+    setTab('general')
     setModalOpen(true)
   }
 
@@ -111,6 +116,7 @@ export default function ProductsAdmin() {
     })
     setEditingId(p.id)
     setUploadError('')
+    setTab('general')
     setModalOpen(true)
   }
 
@@ -179,7 +185,7 @@ export default function ProductsAdmin() {
     setForm(p => ({
       ...p,
       variants: p.variants.map((v, i) =>
-        i === variantIdx ? { ...v, options: [...v.options, { name: '', value: '' }] } : v,
+        i === variantIdx ? { ...v, options: [...v.options, { name: '', value: '', stock: 0 }] } : v,
       ),
     }))
   }
@@ -188,10 +194,7 @@ export default function ProductsAdmin() {
       ...p,
       variants: p.variants.map((v, i) => {
         if (i !== variantIdx) return v
-        return {
-          ...v,
-          options: v.options.map((o, j) => j === optIdx ? { ...o, ...patch } : o),
-        }
+        return { ...v, options: v.options.map((o, j) => j === optIdx ? { ...o, ...patch } : o) }
       }),
     }))
   }
@@ -207,6 +210,12 @@ export default function ProductsAdmin() {
 
   const inputClass = 'w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary'
   const smallInputClass = 'px-2 py-1.5 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary'
+
+  const tabs: { id: Tab; label: string; icon: typeof FileText }[] = [
+    { id: 'general', label: 'Général', icon: FileText },
+    { id: 'variants', label: 'Variantes', icon: Palette },
+    { id: 'advanced', label: 'Avancé', icon: Settings2 },
+  ]
 
   return (
     <div className="space-y-6">
@@ -242,7 +251,7 @@ export default function ProductsAdmin() {
         </Card>
         <Card className="p-4 text-center">
           <p className="text-2xl font-bold text-green-600">{products.filter(p => p.inStock).length}</p>
-          <p className="text-xs text-muted-foreground">En stock</p>
+          <p className="text-xs text-muted-foreground">En vente</p>
         </Card>
         <Card className="p-4 text-center">
           <p className="text-2xl font-bold text-amber-500">{products.filter(p => p.featured).length}/6</p>
@@ -278,7 +287,9 @@ export default function ProductsAdmin() {
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
                         <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-muted/30 shrink-0">
-                          <Image src={product.image} alt={product.name} fill className="object-cover" unoptimized />
+                          {product.image
+                            ? <Image src={product.image} alt={product.name} fill className="object-cover" unoptimized />
+                            : <div className="absolute inset-0 flex items-center justify-center text-muted-foreground"><ImageIcon size={16} /></div>}
                         </div>
                         <span className="font-medium text-foreground">{product.name}</span>
                         {product.featured && (
@@ -329,217 +340,200 @@ export default function ProductsAdmin() {
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <Card className="w-full max-w-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between sticky top-0 bg-card -mx-6 px-6 -mt-6 pt-6 pb-3 border-b border-border z-10">
+          <Card className="w-full max-w-2xl flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
               <h2 className="text-lg font-semibold text-foreground">
                 {editingId ? 'Modifier le produit' : 'Nouveau produit'}
               </h2>
               <button onClick={() => setModalOpen(false)} className="p-1 rounded hover:bg-secondary"><X size={18} /></button>
             </div>
 
-            {/* Basic fields */}
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">Nom *</label>
-                <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className={inputClass} placeholder="Nom du produit" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-foreground mb-1">Prix (€) *</label>
-                  <input type="number" min="0" step="0.5" value={form.price} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} className={inputClass} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-foreground mb-1">Stock</label>
-                  <input type="number" min="0" value={form.stock} onChange={e => setForm(p => ({ ...p, stock: parseInt(e.target.value) || 0 }))} className={inputClass} />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">Catégorie</label>
-                <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))} className={inputClass}>
-                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">Description</label>
-                <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={4} className={inputClass} placeholder="Description du produit..." />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-foreground mb-1">Matériaux</label>
-                  <input value={form.materials} onChange={e => setForm(p => ({ ...p, materials: e.target.value }))} className={inputClass} placeholder="Fil acrylique 100%" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-foreground mb-1">Dimensions</label>
-                  <input value={form.dimensions} onChange={e => setForm(p => ({ ...p, dimensions: e.target.value }))} className={inputClass} placeholder="Hauteur: 15cm" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">Entretien</label>
-                <input value={form.careInstructions} onChange={e => setForm(p => ({ ...p, careInstructions: e.target.value }))} className={inputClass} placeholder="Lavage à la main" />
-              </div>
+            {/* Tabs */}
+            <div className="flex border-b border-border px-6 shrink-0">
+              {tabs.map(t => {
+                const Icon = t.icon
+                const active = tab === t.id
+                const count = t.id === 'variants' && form.variants.length > 0 ? form.variants.length : null
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setTab(t.id)}
+                    className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                      active
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Icon size={15} />
+                    {t.label}
+                    {count !== null && (
+                      <span className="bg-primary/15 text-primary text-xs px-1.5 rounded-full">{count}</span>
+                    )}
+                  </button>
+                )
+              })}
             </div>
 
-            {/* Image */}
-            <div className="space-y-2 pt-3 border-t border-border">
-              <label className="block text-sm font-semibold text-foreground flex items-center gap-2">
-                <ImageIcon size={16} className="text-primary" />
-                Image du produit
-              </label>
-              <div className="flex gap-3 items-start">
-                <div className="relative w-24 h-24 rounded-lg overflow-hidden bg-muted/30 border border-border shrink-0">
-                  {form.image ? (
-                    <Image src={form.image} alt="" fill className="object-cover" unoptimized />
+            {/* Tab content */}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              {/* ---- GÉNÉRAL ---- */}
+              {tab === 'general' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1">Nom du produit *</label>
+                    <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className={inputClass} placeholder="Ex: Amigurumi Ours" autoFocus />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">Prix de base (€) *</label>
+                      <input type="number" min="0" step="0.5" value={form.price} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} className={inputClass} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">Stock global</label>
+                      <input type="number" min="0" value={form.stock} onChange={e => setForm(p => ({ ...p, stock: parseInt(e.target.value) || 0 }))} className={inputClass} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">Catégorie</label>
+                      <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))} className={inputClass}>
+                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1">Description</label>
+                    <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={5} className={inputClass} placeholder="Décrivez votre création..." />
+                  </div>
+
+                  {/* Image */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                      <ImageIcon size={14} className="text-primary" /> Image du produit
+                    </label>
+                    <div className="flex gap-3 items-start">
+                      <div className="relative w-24 h-24 rounded-lg overflow-hidden bg-muted/30 border border-border shrink-0">
+                        {form.image
+                          ? <Image src={form.image} alt="" fill className="object-cover" unoptimized />
+                          : <div className="absolute inset-0 flex items-center justify-center text-muted-foreground"><ImageIcon size={24} /></div>}
+                      </div>
+                      <div className="flex-1 space-y-2">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          className="hidden"
+                          onChange={e => {
+                            const f = e.target.files?.[0]
+                            if (f) handleFileUpload(f)
+                            if (fileInputRef.current) fileInputRef.current.value = ''
+                          }}
+                        />
+                        <Button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} variant="outline" size="sm" className="w-full gap-2">
+                          {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                          {uploading ? 'Téléchargement...' : 'Téléverser une image'}
+                        </Button>
+                        <input value={form.image} onChange={e => setForm(p => ({ ...p, image: e.target.value }))} className={`${inputClass} text-xs`} placeholder="ou collez une URL d'image" />
+                        {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
+                        <p className="text-xs text-muted-foreground">JPG, PNG, WebP — max 5MB</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ---- VARIANTES ---- */}
+              {tab === 'variants' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">
+                      Couleurs, tailles, dimensions… chaque option peut ajuster le prix et son stock.
+                    </p>
+                    <Button type="button" onClick={addVariant} size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 shrink-0">
+                      <Plus size={14} /> Variante
+                    </Button>
+                  </div>
+
+                  {form.variants.length === 0 ? (
+                    <div className="text-center py-10 bg-secondary/30 rounded-lg">
+                      <Palette size={36} className="text-muted-foreground/30 mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">Aucune variante.</p>
+                      <p className="text-xs text-muted-foreground mt-1">Cliquez sur « Variante » pour en ajouter une.</p>
+                    </div>
                   ) : (
-                    <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
-                      <ImageIcon size={24} />
+                    <div className="space-y-3">
+                      {form.variants.map((variant, vIdx) => (
+                        <div key={vIdx} className="border border-border rounded-lg overflow-hidden">
+                          {/* variant header */}
+                          <div className="flex items-center gap-2 p-3 bg-secondary/30 border-b border-border">
+                            <select value={variant.type} onChange={e => updateVariant(vIdx, { type: e.target.value as Variant['type'] })} className={smallInputClass}>
+                              {VARIANT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                            </select>
+                            <input value={variant.label} onChange={e => updateVariant(vIdx, { label: e.target.value })} className={`flex-1 ${smallInputClass}`} placeholder="Étiquette affichée (ex: Couleur)" />
+                            <button type="button" onClick={() => removeVariant(vIdx)} className="p-1.5 rounded text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors shrink-0">
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+
+                          {/* options */}
+                          <div className="p-3 space-y-2">
+                            {variant.options.length > 0 && (
+                              <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground font-medium">
+                                <span className="flex-1">Nom affiché</span>
+                                <span className="w-24">Valeur</span>
+                                <span className="w-20">Prix +€</span>
+                                <span className="w-16">Stock</span>
+                                <span className="w-7" />
+                              </div>
+                            )}
+                            {variant.options.map((opt, oIdx) => (
+                              <div key={oIdx} className="flex items-center gap-1.5">
+                                <input value={opt.name} onChange={e => updateOption(vIdx, oIdx, { name: e.target.value })} className={`flex-1 ${smallInputClass}`} placeholder="Rouge" />
+                                <input value={opt.value} onChange={e => updateOption(vIdx, oIdx, { value: e.target.value })} className={`w-24 ${smallInputClass}`} placeholder="rouge" />
+                                <input type="number" step="0.5" value={opt.priceModifier ?? ''} onChange={e => updateOption(vIdx, oIdx, { priceModifier: e.target.value ? parseFloat(e.target.value) : undefined })} className={`w-20 ${smallInputClass}`} placeholder="0" />
+                                <input type="number" min="0" value={opt.stock ?? ''} onChange={e => updateOption(vIdx, oIdx, { stock: e.target.value ? parseInt(e.target.value) : undefined })} className={`w-16 ${smallInputClass}`} placeholder="0" />
+                                <button type="button" onClick={() => removeOption(vIdx, oIdx)} className="p-1.5 rounded text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors shrink-0">
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ))}
+                            <Button type="button" onClick={() => addOption(vIdx)} variant="outline" size="sm" className="w-full gap-1.5 h-7 text-xs border-dashed">
+                              <Plus size={12} /> Ajouter une option
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
-                <div className="flex-1 space-y-2">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    className="hidden"
-                    onChange={e => {
-                      const f = e.target.files?.[0]
-                      if (f) handleFileUpload(f)
-                      if (fileInputRef.current) fileInputRef.current.value = ''
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                    variant="outline"
-                    size="sm"
-                    className="w-full gap-2"
-                  >
-                    {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                    {uploading ? 'Téléchargement...' : 'Téléverser une image'}
-                  </Button>
-                  <input
-                    value={form.image}
-                    onChange={e => setForm(p => ({ ...p, image: e.target.value }))}
-                    className={`${inputClass} text-xs`}
-                    placeholder="ou URL de l'image"
-                  />
-                  {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
-                  <p className="text-xs text-muted-foreground">JPG, PNG, WebP — max 5MB</p>
-                </div>
-              </div>
-            </div>
+              )}
 
-            {/* Variants */}
-            <div className="space-y-3 pt-3 border-t border-border">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Palette size={16} className="text-primary" />
-                  Variantes ({form.variants.length})
-                </label>
-                <Button type="button" onClick={addVariant} variant="outline" size="sm" className="gap-1.5 h-8">
-                  <Plus size={13} /> Ajouter
-                </Button>
-              </div>
-
-              {form.variants.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-3 bg-secondary/30 rounded-lg">
-                  Aucune variante. Ajoutez des couleurs, tailles, etc.
-                </p>
-              ) : (
+              {/* ---- AVANCÉ ---- */}
+              {tab === 'advanced' && (
                 <div className="space-y-3">
-                  {form.variants.map((variant, vIdx) => (
-                    <div key={vIdx} className="border border-border rounded-lg p-3 space-y-3 bg-secondary/10">
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={variant.type}
-                          onChange={e => updateVariant(vIdx, { type: e.target.value as Variant['type'] })}
-                          className={smallInputClass}
-                        >
-                          {VARIANT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                        </select>
-                        <input
-                          value={variant.label}
-                          onChange={e => updateVariant(vIdx, { label: e.target.value })}
-                          className={`flex-1 ${smallInputClass}`}
-                          placeholder="Étiquette (ex: Couleur)"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeVariant(vIdx)}
-                          className="p-1.5 rounded text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors shrink-0"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        {variant.options.map((opt, oIdx) => (
-                          <div key={oIdx} className="flex items-center gap-1.5">
-                            <input
-                              value={opt.name}
-                              onChange={e => updateOption(vIdx, oIdx, { name: e.target.value })}
-                              className={`flex-1 ${smallInputClass}`}
-                              placeholder="Nom (Rouge)"
-                            />
-                            <input
-                              value={opt.value}
-                              onChange={e => updateOption(vIdx, oIdx, { value: e.target.value })}
-                              className={`w-24 ${smallInputClass}`}
-                              placeholder="Valeur"
-                            />
-                            <input
-                              type="number"
-                              step="0.5"
-                              value={opt.priceModifier ?? ''}
-                              onChange={e => updateOption(vIdx, oIdx, {
-                                priceModifier: e.target.value ? parseFloat(e.target.value) : undefined,
-                              })}
-                              className={`w-20 ${smallInputClass}`}
-                              placeholder="+€"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeOption(vIdx, oIdx)}
-                              className="p-1.5 rounded text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors shrink-0"
-                            >
-                              <X size={14} />
-                            </button>
-                          </div>
-                        ))}
-                        <Button
-                          type="button"
-                          onClick={() => addOption(vIdx)}
-                          variant="outline"
-                          size="sm"
-                          className="w-full gap-1.5 h-7 text-xs border-dashed"
-                        >
-                          <Plus size={12} /> Ajouter une option
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                  <div className="flex items-center gap-3 p-3 rounded-lg border border-border">
+                    <input type="checkbox" id="inStock" checked={form.inStock} onChange={e => setForm(p => ({ ...p, inStock: e.target.checked }))} className="w-4 h-4 accent-primary" />
+                    <label htmlFor="inStock" className="text-sm text-foreground">
+                      <span className="font-medium">En vente</span>
+                      <span className="block text-xs text-muted-foreground">Le produit est visible et achetable en boutique</span>
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                    <input type="checkbox" id="featured" checked={form.featured} onChange={e => setForm(p => ({ ...p, featured: e.target.checked }))} className="w-4 h-4 accent-amber-500" />
+                    <label htmlFor="featured" className="text-sm text-foreground">
+                      <span className="font-medium flex items-center gap-1.5">
+                        <Star size={14} className="fill-amber-400 text-amber-400" /> Mettre en vedette
+                      </span>
+                      <span className="block text-xs text-muted-foreground">Affiché sur la page d'accueil (max 6 produits)</span>
+                    </label>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Flags */}
-            <div className="space-y-3 pt-3 border-t border-border">
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id="inStock" checked={form.inStock} onChange={e => setForm(p => ({ ...p, inStock: e.target.checked }))} className="w-4 h-4 accent-primary" />
-                <label htmlFor="inStock" className="text-sm text-foreground">En vente (visible en boutique)</label>
-              </div>
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
-                <input type="checkbox" id="featured" checked={form.featured} onChange={e => setForm(p => ({ ...p, featured: e.target.checked }))} className="w-4 h-4 accent-amber-500" />
-                <label htmlFor="featured" className="text-sm text-foreground flex items-center gap-1.5">
-                  <Star size={14} className="fill-amber-400 text-amber-400" />
-                  Afficher sur la page d'accueil (max 6 produits)
-                </label>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-3 pt-3 border-t border-border sticky bottom-0 bg-card -mx-6 px-6 -mb-6 pb-6">
+            {/* Footer */}
+            <div className="flex gap-3 px-6 py-4 border-t border-border shrink-0">
               <Button onClick={handleSave} disabled={!form.name.trim() || form.price <= 0 || saving} className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 gap-2">
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                 {editingId ? 'Mettre à jour' : 'Créer le produit'}

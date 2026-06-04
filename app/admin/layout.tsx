@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import {
   LayoutDashboard, Package, ShoppingCart, BarChart3,
-  Menu, X, LogOut, Tag, Palette, Settings, ImageIcon, Globe, UserCog, Loader2,
+  Menu, X, LogOut, Tag, Settings, ImageIcon, Globe, UserCog, Loader2,
 } from 'lucide-react'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -64,7 +64,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
     { href: '/admin/products', label: 'Produits', icon: Package },
     { href: '/admin/categories', label: 'Catégories', icon: Tag },
-    { href: '/admin/product-variants', label: 'Variantes', icon: Palette },
     { href: '/admin/orders', label: 'Commandes', icon: ShoppingCart },
     { href: '/admin/analytics', label: 'Statistiques', icon: BarChart3 },
     { href: '/admin/users', label: 'Utilisateurs', icon: UserCog },

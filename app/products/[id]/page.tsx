@@ -168,22 +168,30 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
                     <div key={variant.label}>
                       <label className="text-sm font-semibold text-foreground mb-2 block">{variant.label}</label>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {variant.options.map((option: any) => (
-                          <button
-                            key={option.value}
-                            onClick={() => handleVariantChange(variant.label, option.value)}
-                            className={`px-3 py-2 rounded-lg text-sm font-medium transition-all border ${
-                              selectedVariants[variant.label] === option.value
-                                ? 'border-primary bg-primary/10 text-primary'
-                                : 'border-border bg-background text-foreground hover:border-primary'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 justify-center">
-                              {selectedVariants[variant.label] === option.value && <Check size={16} />}
-                              <span>{option.name}</span>
-                            </div>
-                          </button>
-                        ))}
+                        {variant.options.map((option: any) => {
+                          const soldOut = typeof option.stock === 'number' && option.stock <= 0
+                          const selected = selectedVariants[variant.label] === option.value
+                          return (
+                            <button
+                              key={option.value}
+                              disabled={soldOut}
+                              onClick={() => handleVariantChange(variant.label, option.value)}
+                              className={`px-3 py-2 rounded-lg text-sm font-medium transition-all border ${
+                                soldOut
+                                  ? 'border-border bg-muted/40 text-muted-foreground line-through cursor-not-allowed'
+                                  : selected
+                                    ? 'border-primary bg-primary/10 text-primary'
+                                    : 'border-border bg-background text-foreground hover:border-primary'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 justify-center">
+                                {selected && !soldOut && <Check size={16} />}
+                                <span>{option.name}</span>
+                                {option.priceModifier ? <span className="text-xs opacity-70">+{option.priceModifier}€</span> : null}
+                              </div>
+                            </button>
+                          )
+                        })}
                       </div>
                     </div>
                   ))}
