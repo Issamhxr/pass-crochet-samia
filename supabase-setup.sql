@@ -65,8 +65,30 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- If products already exists, add the column
+-- If products already exists, add the columns
 ALTER TABLE products ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT false;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS variations JSONB DEFAULT '{"attributes":[],"combos":[]}';
+
+-- ---- Orders ----
+CREATE TABLE IF NOT EXISTS orders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_number TEXT UNIQUE NOT NULL,
+  customer_name TEXT NOT NULL,
+  customer_email TEXT NOT NULL,
+  customer_phone TEXT,
+  shipping_address JSONB DEFAULT '{}',
+  items JSONB NOT NULL DEFAULT '[]',
+  subtotal DECIMAL(10,2) NOT NULL DEFAULT 0,
+  tax DECIMAL(10,2) NOT NULL DEFAULT 0,
+  total DECIMAL(10,2) NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processing','shipped','delivered','cancelled')),
+  paypal_transaction_id TEXT,
+  user_id UUID,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE orders DISABLE ROW LEVEL SECURITY;
+GRANT ALL ON public.orders TO anon, authenticated, service_role;
 
 -- Categories table
 CREATE TABLE IF NOT EXISTS categories (

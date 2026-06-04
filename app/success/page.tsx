@@ -11,7 +11,13 @@ export default function SuccessPage() {
   const [orderNumber, setOrderNumber] = useState('')
 
   useEffect(() => {
-    setOrderNumber(Math.random().toString(36).substring(2, 11).toUpperCase())
+    const stored = sessionStorage.getItem('lastOrderNumber')
+    if (stored) {
+      setOrderNumber(stored)
+      sessionStorage.removeItem('lastOrderNumber')
+    } else {
+      setOrderNumber(Math.random().toString(36).substring(2, 11).toUpperCase())
+    }
   }, [])
 
   return (

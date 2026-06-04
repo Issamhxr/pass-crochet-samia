@@ -4,25 +4,16 @@ import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { supabase, dbToProduct, productToDb } from '@/lib/supabase'
+import {
+  supabase, dbToProduct, productToDb,
+  generateCombos, comboKey,
+  type ProductAttribute, type ProductCombo, type ProductVariations,
+} from '@/lib/supabase'
 import { CATEGORIES } from '@/lib/products-data'
 import {
   Plus, Edit, Trash2, Search, X, Check, Package, Loader2, Star,
-  Upload, ImageIcon, Palette, Settings2, FileText,
+  Upload, ImageIcon, Palette, Settings2, FileText, Sparkles,
 } from 'lucide-react'
-
-interface VariantOption {
-  name: string
-  value: string
-  priceModifier?: number
-  stock?: number
-}
-
-interface Variant {
-  type: 'color' | 'size' | 'material' | 'style' | 'custom'
-  label: string
-  options: VariantOption[]
-}
 
 interface Product {
   id: string
@@ -37,7 +28,8 @@ interface Product {
   dimensions: string
   careInstructions: string
   relatedProducts: string[]
-  variants: Variant[]
+  variants: any[]
+  variations: ProductVariations
   rating: number
   reviews: number
   featured: boolean
@@ -48,17 +40,10 @@ const blank: Omit<Product, 'id'> = {
   image: '', stock: 0,
   inStock: true, description: '',
   materials: '', dimensions: '', careInstructions: '',
-  relatedProducts: [], variants: [], rating: 5.0, reviews: 0,
+  relatedProducts: [], variants: [], variations: { attributes: [], combos: [] },
+  rating: 5.0, reviews: 0,
   featured: false,
 }
-
-const VARIANT_TYPES = [
-  { value: 'color', label: 'Couleur' },
-  { value: 'size', label: 'Taille' },
-  { value: 'material', label: 'Matériau' },
-  { value: 'style', label: 'Style' },
-  { value: 'custom', label: 'Personnalisé' },
-] as const
 
 type Tab = 'general' | 'variants' | 'advanced'
 
@@ -112,6 +97,7 @@ export default function ProductsAdmin() {
       description: p.description, materials: p.materials,
       dimensions: p.dimensions, careInstructions: p.careInstructions,
       relatedProducts: p.relatedProducts, variants: p.variants || [],
+      variations: p.variations || { attributes: [], combos: [] },
       rating: p.rating, reviews: p.reviews, featured: p.featured,
     })
     setEditingId(p.id)
@@ -165,48 +151,62 @@ export default function ProductsAdmin() {
     setUploading(false)
   }
 
-  // ---- Variants editor helpers ----
-  const addVariant = () => {
-    setForm(p => ({
-      ...p,
-      variants: [...p.variants, { type: 'color', label: 'Couleur', options: [] }],
-    }))
+  // ---- Attribute editor helpers ----
+  const attributes = form.variations.attributes
+  const combos = form.variations.combos
+
+  const setVariations = (patch: Partial<ProductVariations>) => {
+    setForm(p => ({ ...p, variations: { ...p.variations, ...patch } }))
   }
-  const updateVariant = (idx: number, patch: Partial<Variant>) => {
-    setForm(p => ({
-      ...p,
-      variants: p.variants.map((v, i) => i === idx ? { ...v, ...patch } : v),
-    }))
+
+  const addAttribute = () => {
+    setVariations({ attributes: [...attributes, { label: '', values: [] }] })
   }
-  const removeVariant = (idx: number) => {
-    setForm(p => ({ ...p, variants: p.variants.filter((_, i) => i !== idx) }))
+  const updateAttributeLabel = (idx: number, label: string) => {
+    setVariations({ attributes: attributes.map((a, i) => i === idx ? { ...a, label } : a) })
   }
-  const addOption = (variantIdx: number) => {
-    setForm(p => ({
-      ...p,
-      variants: p.variants.map((v, i) =>
-        i === variantIdx ? { ...v, options: [...v.options, { name: '', value: '', stock: 0 }] } : v,
+  const removeAttribute = (idx: number) => {
+    setVariations({ attributes: attributes.filter((_, i) => i !== idx) })
+  }
+  const addAttributeValue = (idx: number, value: string) => {
+    const v = value.trim()
+    if (!v) return
+    setVariations({
+      attributes: attributes.map((a, i) =>
+        i === idx && !a.values.includes(v) ? { ...a, values: [...a.values, v] } : a,
       ),
-    }))
+    })
   }
-  const updateOption = (variantIdx: number, optIdx: number, patch: Partial<VariantOption>) => {
-    setForm(p => ({
-      ...p,
-      variants: p.variants.map((v, i) => {
-        if (i !== variantIdx) return v
-        return { ...v, options: v.options.map((o, j) => j === optIdx ? { ...o, ...patch } : o) }
-      }),
-    }))
+  const removeAttributeValue = (idx: number, value: string) => {
+    setVariations({
+      attributes: attributes.map((a, i) =>
+        i === idx ? { ...a, values: a.values.filter(x => x !== value) } : a,
+      ),
+    })
   }
-  const removeOption = (variantIdx: number, optIdx: number) => {
-    setForm(p => ({
-      ...p,
-      variants: p.variants.map((v, i) => {
-        if (i !== variantIdx) return v
-        return { ...v, options: v.options.filter((_, j) => j !== optIdx) }
-      }),
-    }))
+
+  // Generate / regenerate the combination matrix, preserving prices/stock already set
+  const generateMatrix = () => {
+    const optionMaps = generateCombos(attributes)
+    const existing = new Map(combos.map(c => [c.key, c]))
+    const newCombos: ProductCombo[] = optionMaps.map(options => {
+      const key = comboKey(options)
+      const prev = existing.get(key)
+      return {
+        key,
+        options,
+        price: prev?.price ?? form.price,
+        stock: prev?.stock ?? 0,
+      }
+    })
+    setVariations({ combos: newCombos })
   }
+
+  const updateCombo = (key: string, patch: Partial<ProductCombo>) => {
+    setVariations({ combos: combos.map(c => c.key === key ? { ...c, ...patch } : c) })
+  }
+
+  const validAttrCount = attributes.filter(a => a.label.trim() && a.values.length > 0).length
 
   const inputClass = 'w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary'
   const smallInputClass = 'px-2 py-1.5 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary'
@@ -297,10 +297,10 @@ export default function ProductsAdmin() {
                             <Star size={14} className="fill-amber-400 text-amber-400 shrink-0" />
                           </span>
                         )}
-                        {product.variants?.length > 0 && (
-                          <span title={`${product.variants.length} variante(s)`} className="inline-flex items-center gap-1 text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                        {product.variations?.combos?.length > 0 && (
+                          <span title={`${product.variations.combos.length} variation(s)`} className="inline-flex items-center gap-1 text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">
                             <Palette size={11} />
-                            {product.variants.length}
+                            {product.variations.combos.length}
                           </span>
                         )}
                       </div>
@@ -354,7 +354,7 @@ export default function ProductsAdmin() {
               {tabs.map(t => {
                 const Icon = t.icon
                 const active = tab === t.id
-                const count = t.id === 'variants' && form.variants.length > 0 ? form.variants.length : null
+                const count = t.id === 'variants' && combos.length > 0 ? combos.length : null
                 return (
                   <button
                     key={t.id}
@@ -443,67 +443,129 @@ export default function ProductsAdmin() {
                 </div>
               )}
 
-              {/* ---- VARIANTES ---- */}
+              {/* ---- VARIANTES (WooCommerce-style) ---- */}
               {tab === 'variants' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">
-                      Couleurs, tailles, dimensions… chaque option peut ajuster le prix et son stock.
-                    </p>
-                    <Button type="button" onClick={addVariant} size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 shrink-0">
-                      <Plus size={14} /> Variante
-                    </Button>
+                <div className="space-y-6">
+                  {/* Step 1: Attributes */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">1</span>
+                          Attributs
+                        </h3>
+                        <p className="text-xs text-muted-foreground mt-1">Ex: Couleur (Rouge, Bleu) et Taille (40, 45)</p>
+                      </div>
+                      <Button type="button" onClick={addAttribute} size="sm" variant="outline" className="gap-1.5 shrink-0">
+                        <Plus size={14} /> Attribut
+                      </Button>
+                    </div>
+
+                    {attributes.length === 0 ? (
+                      <div className="text-center py-8 bg-secondary/30 rounded-lg">
+                        <Palette size={32} className="text-muted-foreground/30 mx-auto mb-2" />
+                        <p className="text-sm text-muted-foreground">Aucun attribut.</p>
+                        <p className="text-xs text-muted-foreground mt-1">Ajoutez « Couleur », « Taille »…</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {attributes.map((attr, aIdx) => (
+                          <div key={aIdx} className="border border-border rounded-lg p-3 space-y-2 bg-secondary/10">
+                            <div className="flex items-center gap-2">
+                              <input
+                                value={attr.label}
+                                onChange={e => updateAttributeLabel(aIdx, e.target.value)}
+                                className={`flex-1 ${smallInputClass}`}
+                                placeholder="Nom de l'attribut (ex: Couleur)"
+                              />
+                              <button type="button" onClick={() => removeAttribute(aIdx)} className="p-1.5 rounded text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors shrink-0">
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {attr.values.map(val => (
+                                <span key={val} className="inline-flex items-center gap-1 bg-primary/10 text-primary text-xs px-2 py-1 rounded-full">
+                                  {val}
+                                  <button type="button" onClick={() => removeAttributeValue(aIdx, val)} className="hover:text-red-600">
+                                    <X size={12} />
+                                  </button>
+                                </span>
+                              ))}
+                              <input
+                                className="text-xs px-2 py-1 border border-dashed border-border rounded-full bg-background focus:outline-none focus:ring-1 focus:ring-primary w-28"
+                                placeholder="+ valeur, Entrée"
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter' || e.key === ',') {
+                                    e.preventDefault()
+                                    addAttributeValue(aIdx, (e.target as HTMLInputElement).value)
+                                    ;(e.target as HTMLInputElement).value = ''
+                                  }
+                                }}
+                                onBlur={e => { addAttributeValue(aIdx, e.target.value); e.target.value = '' }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                  {form.variants.length === 0 ? (
-                    <div className="text-center py-10 bg-secondary/30 rounded-lg">
-                      <Palette size={36} className="text-muted-foreground/30 mx-auto mb-2" />
-                      <p className="text-sm text-muted-foreground">Aucune variante.</p>
-                      <p className="text-xs text-muted-foreground mt-1">Cliquez sur « Variante » pour en ajouter une.</p>
-                    </div>
-                  ) : (
+                  {/* Step 2: Generate */}
+                  {validAttrCount > 0 && (
                     <div className="space-y-3">
-                      {form.variants.map((variant, vIdx) => (
-                        <div key={vIdx} className="border border-border rounded-lg overflow-hidden">
-                          {/* variant header */}
-                          <div className="flex items-center gap-2 p-3 bg-secondary/30 border-b border-border">
-                            <select value={variant.type} onChange={e => updateVariant(vIdx, { type: e.target.value as Variant['type'] })} className={smallInputClass}>
-                              {VARIANT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                            </select>
-                            <input value={variant.label} onChange={e => updateVariant(vIdx, { label: e.target.value })} className={`flex-1 ${smallInputClass}`} placeholder="Étiquette affichée (ex: Couleur)" />
-                            <button type="button" onClick={() => removeVariant(vIdx)} className="p-1.5 rounded text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors shrink-0">
-                              <Trash2 size={15} />
-                            </button>
-                          </div>
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">2</span>
+                          Variations ({combos.length})
+                        </h3>
+                        <Button type="button" onClick={generateMatrix} size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 shrink-0">
+                          <Sparkles size={14} /> Générer les combinaisons
+                        </Button>
+                      </div>
 
-                          {/* options */}
-                          <div className="p-3 space-y-2">
-                            {variant.options.length > 0 && (
-                              <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground font-medium">
-                                <span className="flex-1">Nom affiché</span>
-                                <span className="w-24">Valeur</span>
-                                <span className="w-20">Prix +€</span>
-                                <span className="w-16">Stock</span>
-                                <span className="w-7" />
-                              </div>
-                            )}
-                            {variant.options.map((opt, oIdx) => (
-                              <div key={oIdx} className="flex items-center gap-1.5">
-                                <input value={opt.name} onChange={e => updateOption(vIdx, oIdx, { name: e.target.value })} className={`flex-1 ${smallInputClass}`} placeholder="Rouge" />
-                                <input value={opt.value} onChange={e => updateOption(vIdx, oIdx, { value: e.target.value })} className={`w-24 ${smallInputClass}`} placeholder="rouge" />
-                                <input type="number" step="0.5" value={opt.priceModifier ?? ''} onChange={e => updateOption(vIdx, oIdx, { priceModifier: e.target.value ? parseFloat(e.target.value) : undefined })} className={`w-20 ${smallInputClass}`} placeholder="0" />
-                                <input type="number" min="0" value={opt.stock ?? ''} onChange={e => updateOption(vIdx, oIdx, { stock: e.target.value ? parseInt(e.target.value) : undefined })} className={`w-16 ${smallInputClass}`} placeholder="0" />
-                                <button type="button" onClick={() => removeOption(vIdx, oIdx)} className="p-1.5 rounded text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors shrink-0">
-                                  <X size={14} />
-                                </button>
+                      {combos.length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-4 bg-secondary/30 rounded-lg">
+                          Cliquez sur « Générer les combinaisons » pour créer chaque variation (prix + stock).
+                        </p>
+                      ) : (
+                        <div className="border border-border rounded-lg overflow-hidden">
+                          <div className="flex items-center gap-2 px-3 py-2 bg-secondary/40 text-xs font-medium text-muted-foreground">
+                            <span className="flex-1">Combinaison</span>
+                            <span className="w-24">Prix (€)</span>
+                            <span className="w-20">Stock</span>
+                          </div>
+                          <div className="divide-y divide-border max-h-64 overflow-y-auto">
+                            {combos.map(combo => (
+                              <div key={combo.key} className="flex items-center gap-2 px-3 py-2">
+                                <div className="flex-1 flex flex-wrap gap-1">
+                                  {Object.entries(combo.options).map(([k, v]) => (
+                                    <span key={k} className="text-xs bg-secondary px-1.5 py-0.5 rounded">
+                                      <span className="text-muted-foreground">{k}:</span> {v}
+                                    </span>
+                                  ))}
+                                </div>
+                                <input
+                                  type="number" min="0" step="0.5"
+                                  value={combo.price}
+                                  onChange={e => updateCombo(combo.key, { price: parseFloat(e.target.value) || 0 })}
+                                  className={`w-24 ${smallInputClass}`}
+                                />
+                                <input
+                                  type="number" min="0"
+                                  value={combo.stock}
+                                  onChange={e => updateCombo(combo.key, { stock: parseInt(e.target.value) || 0 })}
+                                  className={`w-20 ${smallInputClass}`}
+                                />
                               </div>
                             ))}
-                            <Button type="button" onClick={() => addOption(vIdx)} variant="outline" size="sm" className="w-full gap-1.5 h-7 text-xs border-dashed">
-                              <Plus size={12} /> Ajouter une option
-                            </Button>
                           </div>
                         </div>
-                      ))}
+                      )}
+                      {combos.length > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          Astuce : si vous modifiez les attributs, recliquez sur « Générer » — les prix/stock déjà saisis sont conservés.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>

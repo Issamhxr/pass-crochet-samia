@@ -66,31 +66,49 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
     )
   }
 
+  const attributes = product.variations?.attributes || []
+  const combos = product.variations?.combos || []
+  const hasVariations = attributes.length > 0 && combos.length > 0
+
   const handleVariantChange = (label: string, value: string) => {
     setSelectedVariants(prev => ({ ...prev, [label]: value }))
   }
 
-  const calculateFinalPrice = () => {
-    let price = product.price
-    product.variants?.forEach(variant => {
-      const opt = variant.options.find((o: any) => o.value === selectedVariants[variant.label])
-      if (opt?.priceModifier) price += opt.priceModifier
-    })
-    return price
+  // Which combo matches the current selection (all attributes chosen)?
+  const allSelected = hasVariations && attributes.every(a => selectedVariants[a.label])
+  const selectedCombo = allSelected
+    ? combos.find(c => attributes.every(a => c.options[a.label] === selectedVariants[a.label]))
+    : undefined
+
+  // Is a given attribute value available given the OTHER current selections?
+  const isValueAvailable = (label: string, value: string) => {
+    const trial = { ...selectedVariants, [label]: value }
+    return combos.some(c =>
+      c.stock > 0 &&
+      attributes.every(a => !trial[a.label] || c.options[a.label] === trial[a.label]),
+    )
   }
 
+  const calculateFinalPrice = () => {
+    if (hasVariations) return selectedCombo ? selectedCombo.price : product.price
+    return product.price
+  }
+
+  const inStockNow = hasVariations
+    ? (selectedCombo ? selectedCombo.stock > 0 : combos.some(c => c.stock > 0))
+    : product.inStock
+
+  const canAddToCart = hasVariations ? !!selectedCombo && selectedCombo.stock > 0 : product.inStock
+
   const handleAddToCart = () => {
-    const variantLabel = product.variants?.length
-      ? ' - ' + Object.entries(selectedVariants).map(([key, val]) => {
-          const variant = product.variants?.find((v: any) => v.label === key)
-          const opt = variant?.options.find((o: any) => o.value === val)
-          return `${key}: ${opt?.name}`
-        }).join(', ')
+    if (!canAddToCart) return
+    const comboLabel = hasVariations && selectedCombo
+      ? ' - ' + Object.entries(selectedCombo.options).map(([k, v]) => `${k}: ${v}`).join(', ')
       : ''
     for (let i = 0; i < quantity; i++) {
       addItem({
         id: `${product.id}-${Date.now()}-${i}`,
-        name: product.name + variantLabel,
+        name: product.name + comboLabel,
         price: calculateFinalPrice(),
         image: product.image,
         category: product.category,
@@ -162,22 +180,22 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
                 </div>
               </div>
 
-              {product.variants && product.variants.length > 0 && (
+              {hasVariations && (
                 <div className="space-y-4 pt-4 border-t border-border">
-                  {product.variants.map((variant: any) => (
-                    <div key={variant.label}>
-                      <label className="text-sm font-semibold text-foreground mb-2 block">{variant.label}</label>
+                  {attributes.map(attr => (
+                    <div key={attr.label}>
+                      <label className="text-sm font-semibold text-foreground mb-2 block">{attr.label}</label>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {variant.options.map((option: any) => {
-                          const soldOut = typeof option.stock === 'number' && option.stock <= 0
-                          const selected = selectedVariants[variant.label] === option.value
+                        {attr.values.map(value => {
+                          const selected = selectedVariants[attr.label] === value
+                          const available = isValueAvailable(attr.label, value)
                           return (
                             <button
-                              key={option.value}
-                              disabled={soldOut}
-                              onClick={() => handleVariantChange(variant.label, option.value)}
+                              key={value}
+                              disabled={!available}
+                              onClick={() => handleVariantChange(attr.label, value)}
                               className={`px-3 py-2 rounded-lg text-sm font-medium transition-all border ${
-                                soldOut
+                                !available
                                   ? 'border-border bg-muted/40 text-muted-foreground line-through cursor-not-allowed'
                                   : selected
                                     ? 'border-primary bg-primary/10 text-primary'
@@ -185,9 +203,8 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
                               }`}
                             >
                               <div className="flex items-center gap-2 justify-center">
-                                {selected && !soldOut && <Check size={16} />}
-                                <span>{option.name}</span>
-                                {option.priceModifier ? <span className="text-xs opacity-70">+{option.priceModifier}€</span> : null}
+                                {selected && available && <Check size={16} />}
+                                <span>{value}</span>
                               </div>
                             </button>
                           )
@@ -195,15 +212,25 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
                       </div>
                     </div>
                   ))}
+                  {allSelected && selectedCombo && (
+                    <p className="text-xs text-muted-foreground">
+                      {selectedCombo.stock > 0
+                        ? `${selectedCombo.stock} en stock pour cette combinaison`
+                        : 'Cette combinaison est en rupture de stock'}
+                    </p>
+                  )}
                 </div>
               )}
 
               <div className="space-y-4 pt-4 border-t border-border">
                 <div>
                   <p className="text-3xl font-bold text-primary">{calculateFinalPrice()}€</p>
-                  <p className={`text-sm font-medium ${product.inStock ? 'text-green-600' : 'text-red-600'}`}>
-                    {product.inStock ? 'En stock' : 'Rupture de stock'}
+                  <p className={`text-sm font-medium ${inStockNow ? 'text-green-600' : 'text-red-600'}`}>
+                    {inStockNow ? 'En stock' : 'Rupture de stock'}
                   </p>
+                  {hasVariations && !allSelected && (
+                    <p className="text-sm text-amber-600 mt-1">Choisissez une option pour chaque attribut.</p>
+                  )}
                 </div>
                 <div className="space-y-4">
                   <div className="flex items-center gap-4">
@@ -221,11 +248,11 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
                   <Button
                     size="lg"
                     onClick={handleAddToCart}
-                    disabled={!product.inStock}
+                    disabled={!canAddToCart}
                     className="w-full bg-primary text-primary-foreground hover:bg-primary/90 gap-2 rounded-lg font-semibold shadow-md hover:shadow-lg transition-all"
                   >
                     <ShoppingCart size={20} />
-                    Ajouter au panier
+                    {hasVariations && !allSelected ? 'Choisissez vos options' : 'Ajouter au panier'}
                   </Button>
                 </div>
               </div>

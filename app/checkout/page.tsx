@@ -111,10 +111,15 @@ export default function CheckoutPage() {
           const res = await fetch('/api/capture-paypal-order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orderID: data.orderID }),
+            body: JSON.stringify({
+              orderID: data.orderID,
+              items: itemsRef.current,
+              customer: formDataRef.current,
+            }),
           })
           const result = await res.json()
           if (!res.ok || !result.success) throw new Error(result.error ?? 'Échec de la confirmation')
+          if (result.orderNumber) sessionStorage.setItem('lastOrderNumber', result.orderNumber)
           clearCart()
           router.push('/success')
         } catch (err: any) {
