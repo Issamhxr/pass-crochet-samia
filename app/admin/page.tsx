@@ -1,30 +1,109 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/card'
-import { ShoppingCart, Package, Users, TrendingUp, Calendar, DollarSign } from 'lucide-react'
+import { supabase, type DbOrder } from '@/lib/supabase'
+import {
+  ShoppingCart, Package, Users, TrendingUp, Calendar, DollarSign, Loader2,
+} from 'lucide-react'
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'En attente',
+  processing: 'En traitement',
+  shipped: 'Expédié',
+  delivered: 'Livré',
+  cancelled: 'Annulé',
+}
+const STATUS_STYLES: Record<string, string> = {
+  pending: 'bg-yellow-100 text-yellow-700',
+  processing: 'bg-blue-100 text-blue-700',
+  shipped: 'bg-purple-100 text-purple-700',
+  delivered: 'bg-green-100 text-green-700',
+  cancelled: 'bg-red-100 text-red-700',
+}
+
+function relativeDate(iso: string): string {
+  const d = new Date(iso)
+  const diff = Date.now() - d.getTime()
+  const days = Math.floor(diff / 86400000)
+  if (days === 0) return "Aujourd'hui"
+  if (days === 1) return 'Hier'
+  if (days < 7) return `Il y a ${days} jours`
+  return d.toLocaleDateString('fr-FR')
+}
 
 export default function AdminDashboard() {
-  // Mock data - in production this would come from a database
+  const [orders, setOrders] = useState<DbOrder[]>([])
+  const [productCount, setProductCount] = useState(0)
+  const [stockUnits, setStockUnits] = useState(0)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    const [{ data: ords }, { data: prods }] = await Promise.all([
+      supabase.from('orders').select('*').order('created_at', { ascending: false }),
+      supabase.from('products').select('stock'),
+    ])
+    if (ords) setOrders(ords as DbOrder[])
+    if (prods) {
+      setProductCount(prods.length)
+      setStockUnits(prods.reduce((s: number, p: any) => s + (p.stock || 0), 0))
+    }
+    setLoading(false)
+  }
+
+  if (loading) {
+    return <div className="flex items-center justify-center py-24"><Loader2 size={32} className="animate-spin text-primary" /></div>
+  }
+
+  const now = new Date()
+  const valid = orders.filter(o => o.status !== 'cancelled')
+
+  const thisMonth = valid.filter(o => {
+    const d = new Date(o.created_at)
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+  })
+  const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const lastMonth = valid.filter(o => {
+    const d = new Date(o.created_at)
+    return d.getFullYear() === lastMonthDate.getFullYear() && d.getMonth() === lastMonthDate.getMonth()
+  })
+
+  const monthRevenue = thisMonth.reduce((s, o) => s + Number(o.total), 0)
+  const lastMonthRevenue = lastMonth.reduce((s, o) => s + Number(o.total), 0)
+  const revenueChange = lastMonthRevenue > 0
+    ? Math.round(((monthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
+    : null
+
+  // Current quarter revenue
+  const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3
+  const quarterRevenue = valid.filter(o => {
+    const d = new Date(o.created_at)
+    return d.getFullYear() === now.getFullYear() && d.getMonth() >= quarterStartMonth
+  }).reduce((s, o) => s + Number(o.total), 0)
+
+  const activeCustomers = new Set(valid.map(o => o.customer_email.toLowerCase())).size
+
   const stats = [
-    { label: 'Commandes ce mois', value: '24', icon: ShoppingCart, color: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' },
-    { label: 'Produits en stock', value: '156', icon: Package, color: 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' },
-    { label: 'Clients actifs', value: '82', icon: Users, color: 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' },
-    { label: 'Revenus ce mois', value: '2.450€', icon: DollarSign, color: 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400' },
+    { label: 'Commandes ce mois', value: String(thisMonth.length), icon: ShoppingCart, color: 'bg-blue-100 text-blue-600' },
+    { label: 'Produits en stock', value: String(stockUnits), icon: Package, color: 'bg-green-100 text-green-600' },
+    { label: 'Clients', value: String(activeCustomers), icon: Users, color: 'bg-purple-100 text-purple-600' },
+    { label: 'Revenus ce mois', value: `${monthRevenue.toFixed(2)}€`, icon: DollarSign, color: 'bg-yellow-100 text-yellow-600' },
   ]
 
-  const recentOrders = [
-    { id: '001', customer: 'Marie D.', amount: '85.50€', status: 'Livré', date: '2 jours ago' },
-    { id: '002', customer: 'Sophie L.', amount: '42.00€', status: 'En cours', date: '1 jour ago' },
-    { id: '003', customer: 'Emma T.', amount: '156.80€', status: 'En attente', date: 'Aujourd\'hui' },
-    { id: '004', customer: 'Julie M.', amount: '68.50€', status: 'Livré', date: 'Aujourd\'hui' },
-  ]
+  const recentOrders = orders.slice(0, 5)
 
-  const topProducts = [
-    { name: 'Amigurumi Ours', sales: 45, revenue: '1.575€' },
-    { name: 'Sac à Main Granny', sales: 32, revenue: '1.760€' },
-    { name: 'Amigurumi Chat', sales: 28, revenue: '1.120€' },
-    { name: 'Pochette Rose', sales: 24, revenue: '672€' },
-  ]
+  // Top products by units sold (from order items)
+  const productSales: Record<string, { name: string; sales: number; revenue: number }> = {}
+  valid.forEach(o => o.items?.forEach(it => {
+    const key = it.name
+    if (!productSales[key]) productSales[key] = { name: it.name, sales: 0, revenue: 0 }
+    productSales[key].sales += it.quantity
+    productSales[key].revenue += it.price * it.quantity
+  }))
+  const topProducts = Object.values(productSales).sort((a, b) => b.revenue - a.revenue).slice(0, 5)
 
   return (
     <div className="space-y-8">
@@ -62,26 +141,29 @@ export default function AdminDashboard() {
             <Calendar className="text-muted-foreground" size={20} />
           </div>
 
-          <div className="space-y-4">
-            {recentOrders.map((order) => (
-              <div key={order.id} className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-secondary/50 transition-colors">
-                <div className="flex-1">
-                  <p className="font-medium text-foreground">Commande #{order.id}</p>
-                  <p className="text-sm text-muted-foreground">{order.customer}</p>
+          {recentOrders.length === 0 ? (
+            <div className="text-center py-10">
+              <ShoppingCart size={36} className="text-muted-foreground/30 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">Aucune commande pour le moment.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {recentOrders.map(order => (
+                <div key={order.id} className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-secondary/50 transition-colors">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-foreground truncate">#{order.order_number}</p>
+                    <p className="text-sm text-muted-foreground truncate">{order.customer_name} · {relativeDate(order.created_at)}</p>
+                  </div>
+                  <div className="text-right shrink-0 ml-3">
+                    <p className="font-semibold text-foreground">{Number(order.total).toFixed(2)}€</p>
+                    <span className={`text-xs px-3 py-1 rounded-full font-medium inline-block mt-1 ${STATUS_STYLES[order.status]}`}>
+                      {STATUS_LABELS[order.status]}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="font-semibold text-foreground">{order.amount}</p>
-                  <span className={`text-xs px-3 py-1 rounded-full font-medium inline-block mt-1 ${
-                    order.status === 'Livré' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                    order.status === 'En cours' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                    'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                  }`}>
-                    {order.status}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </Card>
 
         {/* Revenue Card */}
@@ -94,13 +176,24 @@ export default function AdminDashboard() {
           <div className="space-y-6">
             <div>
               <p className="text-sm text-muted-foreground mb-2">Ce mois</p>
-              <p className="text-3xl font-bold text-foreground">2.450€</p>
-              <p className="text-xs text-green-600 mt-1">+12% par rapport au mois dernier</p>
+              <p className="text-3xl font-bold text-foreground">{monthRevenue.toFixed(2)}€</p>
+              {revenueChange !== null && (
+                <p className={`text-xs mt-1 ${revenueChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {revenueChange >= 0 ? '+' : ''}{revenueChange}% par rapport au mois dernier
+                </p>
+              )}
             </div>
 
             <div className="pt-6 border-t border-border">
               <p className="text-sm text-muted-foreground mb-2">Ce trimestre</p>
-              <p className="text-2xl font-bold text-foreground">7.820€</p>
+              <p className="text-2xl font-bold text-foreground">{quarterRevenue.toFixed(2)}€</p>
+            </div>
+
+            <div className="pt-6 border-t border-border">
+              <p className="text-sm text-muted-foreground mb-2">Total (toutes commandes)</p>
+              <p className="text-2xl font-bold text-primary">
+                {valid.reduce((s, o) => s + Number(o.total), 0).toFixed(2)}€
+              </p>
             </div>
           </div>
         </Card>
@@ -110,29 +203,36 @@ export default function AdminDashboard() {
       <Card className="p-6">
         <h2 className="text-xl font-serif font-bold text-foreground mb-6">Produits les plus vendus</h2>
 
-        <div className="space-y-4">
-          {topProducts.map((product, index) => (
-            <div key={index} className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-secondary/50 transition-colors">
-              <div className="flex-1">
-                <p className="font-medium text-foreground">{product.name}</p>
-              </div>
-              <div className="flex items-center gap-8">
-                <div className="text-right">
-                  <p className="text-sm text-muted-foreground">Ventes</p>
-                  <p className="font-semibold text-foreground">{product.sales}</p>
+        {topProducts.length === 0 ? (
+          <div className="text-center py-8">
+            <Package size={36} className="text-muted-foreground/30 mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">Aucune vente enregistrée pour le moment.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {topProducts.map((product, index) => (
+              <div key={index} className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-secondary/50 transition-colors">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-foreground truncate">{product.name}</p>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm text-muted-foreground">Revenu</p>
-                  <p className="font-semibold text-primary">{product.revenue}</p>
+                <div className="flex items-center gap-8 shrink-0">
+                  <div className="text-right">
+                    <p className="text-sm text-muted-foreground">Ventes</p>
+                    <p className="font-semibold text-foreground">{product.sales}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-muted-foreground">Revenu</p>
+                    <p className="font-semibold text-primary">{product.revenue.toFixed(2)}€</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       {/* Quick Actions */}
-      <Card className="p-6 bg-gradient-to-r from-primary/10 to-accent/10">
+      <Card className="p-6 bg-linear-to-r from-primary/10 to-accent/10">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
           <div>
             <h3 className="font-serif text-lg font-bold text-foreground mb-2">Gestion rapide</h3>
