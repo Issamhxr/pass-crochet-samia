@@ -3,32 +3,62 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
 import { supabase } from '@/lib/supabase'
 import {
-  LayoutDashboard, Package, ShoppingCart, BarChart3, Users,
-  Menu, X, LogOut, Tag, Palette, Settings, ImageIcon, Globe, UserCog,
+  LayoutDashboard, Package, ShoppingCart, BarChart3,
+  Menu, X, LogOut, Tag, Palette, Settings, ImageIcon, Globe, UserCog, Loader2,
 } from 'lucide-react'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [userName, setUserName] = useState('Admin')
   const [userInitial, setUserInitial] = useState('A')
+  const [authChecked, setAuthChecked] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
 
-  if (pathname === '/admin/login') return <>{children}</>
+  const isLoginPage = pathname === '/admin/login'
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return
-      supabase.from('profiles').select('full_name, email').eq('id', user.id).single().then(({ data }) => {
-        const name = data?.full_name || data?.email || 'Admin'
-        setUserName(name.split(' ')[0])
-        setUserInitial(name[0].toUpperCase())
-      })
-    })
-  }, [])
+    if (isLoginPage) return
+
+    let mounted = true
+
+    async function checkAuth() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          if (mounted) router.replace('/admin/login')
+          return
+        }
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role, full_name, email')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        if (!profile || profile.role !== 'admin') {
+          await supabase.auth.signOut()
+          if (mounted) router.replace('/admin/login')
+          return
+        }
+
+        if (mounted) {
+          const name = profile.full_name || profile.email || 'Admin'
+          setUserName(name.split(' ')[0])
+          setUserInitial(name[0].toUpperCase())
+          setAuthChecked(true)
+        }
+      } catch (err) {
+        console.error('Auth check failed:', err)
+        if (mounted) router.replace('/admin/login')
+      }
+    }
+
+    checkAuth()
+    return () => { mounted = false }
+  }, [router, isLoginPage])
 
   const navItems = [
     { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
@@ -50,6 +80,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const isActive = (href: string) =>
     href === '/admin' ? pathname === '/admin' : pathname.startsWith(href)
+
+  if (isLoginPage) return <>{children}</>
+
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 size={32} className="animate-spin text-primary" />
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
