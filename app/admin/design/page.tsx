@@ -165,10 +165,8 @@ export default function DesignPage() {
 
   const tabs = [
     { id: 'images', label: 'Images', emoji: '🖼️' },
-    { id: 'paypal', label: 'PayPal', emoji: '💳' },
     { id: 'branding', label: 'Marque', emoji: '🏷️' },
     { id: 'colors', label: 'Couleurs', emoji: '🎨' },
-    { id: 'contact', label: 'Contact', emoji: '📞' },
     { id: 'social', label: 'Réseaux', emoji: '📱' },
     { id: 'seo', label: 'SEO', emoji: '🔍' },
   ]
